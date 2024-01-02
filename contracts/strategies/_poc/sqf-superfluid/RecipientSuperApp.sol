@@ -14,6 +14,7 @@ import {IInstantDistributionAgreementV1} from
     "../../../../lib/superfluid-protocol-monorepo/packages/ethereum-contracts/contracts/interfaces/agreements/IInstantDistributionAgreementV1.sol";
 
 import {SQFSuperFluidStrategy} from "./SQFSuperFluidStrategy.sol";
+import "hardhat/console.sol";
 
 contract RecipientSuperApp is ISuperApp {
     using SuperTokenV1Library for ISuperToken;
@@ -90,6 +91,8 @@ contract RecipientSuperApp is ISuperApp {
         internal
         returns (bytes memory newCtx)
     {
+        console.log("SUPERAPP: onFlowUpdated, previousFlowRate: %s, newFlowRate: %s", uint256(int256(previousFlowRate)), uint256(int256(newFlowRate)));
+        
         strategy.adjustWeightings(uint256(int256(previousFlowRate)), uint256(int256(newFlowRate)));
         newCtx = _updateOutflow(ctx);
     }
@@ -102,21 +105,38 @@ contract RecipientSuperApp is ISuperApp {
     // https://Ihub.com/superfluid-finance/super-examples/blob/main/projects/tradeable-cashflow/contracts/RedirectAll.sol#L163
     function _updateOutflow(bytes memory ctx) private returns (bytes memory newCtx) {
         newCtx = ctx;
-
         int96 netFlowRate = acceptedToken.getNetFlowRate(address(this));
 
         int96 outFlowRate = acceptedToken.getFlowRate(address(this), recipient);
 
         int96 inFlowRate = netFlowRate + outFlowRate;
 
+        console.log("SUPERAPP: Net flow rate:");
+        console.logInt(netFlowRate);
+        console.log("SUPERAPP: Out flow rate:");
+        console.logInt(outFlowRate);
+        console.log("SUPERAPP: In flow rate:");
+        console.logInt(inFlowRate);
+
         if (inFlowRate == 0) {
+            // lets check if a flow exists
+            (,int96 flowRate,,) = acceptedToken.getFlowInfo(address(this), recipient);
+            if(flowRate == 0) {
+                console.log("SUPERAPP: No flow exists to delete!!!!!");
+            } else {
+                console.log("SUPERAPP: Deleting flow");
+            }
+
             // The flow does exist and should be deleted.
             newCtx = acceptedToken.deleteFlowWithCtx(address(this), recipient, ctx);
+            console.log("SUPERAPP: Deleted flow!");
         } else if (outFlowRate != 0) {
             // The flow does exist and needs to be updated.
+            console.log("SUPERAPP: Updating flow");
             newCtx = acceptedToken.updateFlowWithCtx(recipient, inFlowRate, ctx);
         } else {
             // The flow does not exist but should be created.
+            console.log("SUPERAPP: Creating flow");
             newCtx = acceptedToken.createFlowWithCtx(recipient, inFlowRate, ctx);
         }
     }
@@ -193,7 +213,7 @@ contract RecipientSuperApp is ISuperApp {
 
         (address sender,) = abi.decode(agreementData, (address, address));
         (int96 previousFlowRate,) = abi.decode(cbdata, (int96, uint256));
-        (, int96 flowRate,,) = superToken.getFlowInfo(sender, address(this));
+        int96 flowRate = superToken.getFlowRate(sender, address(this));
 
         return onFlowUpdated(
             previousFlowRate,
@@ -227,13 +247,13 @@ contract RecipientSuperApp is ISuperApp {
         bytes calldata /*agreementData*/,
         bytes calldata cbdata,
         bytes calldata ctx
-    ) external override returns (bytes memory) {
+    ) external override returns (bytes memory newCtx) {
         if (msg.sender != address(HOST) || !isAcceptedAgreement(agreementClass) || !isAcceptedSuperToken(superToken)) {
             return ctx;
         }
-
-        (, int96 previousFlowRate) = abi.decode(cbdata, (uint256, int96));
-        return onFlowUpdated(previousFlowRate, 0, ctx);
+        (int96 previousFlowRate,) = abi.decode(cbdata, (int96, uint256));
+        console.log("SUPERAPP: afterAgreementTerminated, previousFlowRate: %s", uint256(int256(previousFlowRate)));
+        return ctx;//onFlowUpdated(previousFlowRate, 0, ctx);
     }
 
     /// ================================

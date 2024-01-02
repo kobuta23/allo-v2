@@ -20,7 +20,8 @@ import {SuperfluidGovernanceII} from
     "../../../lib/superfluid-protocol-monorepo/packages/ethereum-contracts/contracts/gov/SuperfluidGovernanceII.sol";
 import {
     ISuperfluid,
-    ISuperfluidPool
+    ISuperfluidPool,
+    ISuperApp
 } from
     "../../../lib/superfluid-protocol-monorepo/packages/ethereum-contracts/contracts/interfaces/superfluid/ISuperfluid.sol";
 import {ISuperToken} from
@@ -30,6 +31,9 @@ import {GeneralDistributionAgreementV1} from
 
 import {MockPassportDecoder} from "test/utils/MockPassportDecoder.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+import "hardhat/console.sol";
+
 
 contract SQFSuperFluidStrategyTest is RegistrySetupFullLive, AlloSetup, Native, EventSetup, Errors {
     using SuperTokenV1Library for ISuperToken;
@@ -715,96 +719,287 @@ contract SQFSuperFluidStrategyTest is RegistrySetupFullLive, AlloSetup, Native, 
         assertEq(_strategy.minPassportScore(), newMinPassportScore);
     }
 
-    function __deploy_strategy() internal returns (SQFSuperFluidStrategy) {
-        return new SQFSuperFluidStrategy(address(allo()), "SQFSuperFluidStrategyv1");
+    // to test Fran's tests only, use this forge command:
+    // forge test --match-path test/foundry/strategies/SQFSuperFluidStrategy.t.sol --match-test Fran -vv 
+    function testFranBasicRedirectAll() public {
+        (address recipient1, address recipient2) = __setUpDistribution(1e10);
+        address alice = makeAddr("alice");
+        console.log("alice", alice);
+        __setUpDonor(alice);
+
+        __streamToSuperAppOfRecipient(alice, recipient1, 1e10);
+
+        vm.warp(block.timestamp + 100);
+        
+        __streamToSuperAppOfRecipient(alice, recipient1, 1e10 + 1);
+
+        vm.warp(block.timestamp + 100);
+
+        __streamToSuperAppOfRecipient(alice, recipient1, 0);
     }
 
-    function __enocdeInitializeParams() internal view returns (bytes memory) {
-        return abi.encode(
-            useRegistryAnchor,
-            metadataRequired,
-            passportDecoder,
-            superfluidHost,
-            allocationSuperToken,
-            registrationStartTime,
-            registrationEndTime,
-            allocationStartTime,
-            allocationEndTime,
-            minPassportScore,
-            initialSuperAppBalance
-        );
+    function testFranSuperAppRedirectAll() public {
+        (address recipient1, address recipient2) = __setUpDistribution(1e10);
+        address alice = makeAddr("alice");
+        address bob = makeAddr("bob");
+        console.log("alice", alice);
+        console.log("bob", bob);
+        __setUpDonor(alice);
+        __setUpDonor(bob);
+
+        uint256 time = block.timestamp;
+
+        __streamToSuperAppOfRecipient(alice, recipient1, 1e10);
+        __streamToSuperAppOfRecipient(bob, recipient1, 1e10);
+
+        vm.warp(time + 100);
+
+        // __streamToSuperAppOfRecipient(alice, recipient2, 1e11);
+        // __streamToSuperAppOfRecipient(bob, recipient2, 1e11);
+
+        vm.warp(time + 200);
+
+        __streamToSuperAppOfRecipient(alice, recipient1, 1e12);
+        __streamToSuperAppOfRecipient(bob, recipient1, 1e12);
+
+        vm.warp(time + 300);
+
+        // __streamToSuperAppOfRecipient(alice, recipient2, 1e12);
+        // __streamToSuperAppOfRecipient(bob, recipient2, 1e12);
+
+        vm.warp(time + 400);
+
+        __streamToSuperAppOfRecipient(alice, recipient1, 0);
+        __streamToSuperAppOfRecipient(bob, recipient1, 0);
+
+        vm.warp(time + 500);
+
+        // __streamToSuperAppOfRecipient(alice, recipient2, 0);
+        // __streamToSuperAppOfRecipient(bob, recipient2, 0);
     }
 
-    function __createPool(address strategy) internal returns (uint256 _poolId) {
-        vm.prank(pool_admin());
-        _poolId = allo().createPoolWithCustomStrategy(
-            poolProfile_id(),
-            strategy,
-            __enocdeInitializeParams(),
-            address(superFakeDai),
-            0,
-            Metadata(1, "test"),
-            pool_managers()
-        );
+
+    function testDoThings() public {
+        __setUpDistribution(11574074074074074); // 1000 a day
+        
+        
     }
 
-    function __register_recipient() internal returns (address recipientId) {
-        vm.expectEmit(true, true, true, false);
-        emit Registered(
-            profile1_anchor(), abi.encode(profile1_anchor(), recipient1(), Metadata(1, "test")), profile1_member1()
-        );
+    /* FRAN's comments:
+        on the tests: 
+        - seems like it'd be good to test this with a lot more recipients as well
 
-        vm.prank(profile1_member1());
-        recipientId = allo().registerRecipient(poolId, abi.encode(profile1_anchor(), recipient1(), Metadata(1, "test")));
+
+        on the contract:
+        - recipientFlowRate and totalUnitsByRecipient mappings aren't really needed, they can by queried from superfluid
+        - ask why recipientID isn't just the recipient's address. WTF? 
+
+        checks to do:
+        - can a recipient be added to the pool after the allocation period has started?
+    */
+
+    /** helper function block **/
+        function __deploy_strategy() internal returns (SQFSuperFluidStrategy) {
+            return new SQFSuperFluidStrategy(address(allo()), "SQFSuperFluidStrategyv1");
+        }
+
+        function __enocdeInitializeParams() internal view returns (bytes memory) {
+            return abi.encode(
+                useRegistryAnchor,
+                metadataRequired,
+                passportDecoder,
+                superfluidHost,
+                allocationSuperToken,
+                registrationStartTime,
+                registrationEndTime,
+                allocationStartTime,
+                allocationEndTime,
+                minPassportScore,
+                initialSuperAppBalance
+            );
+        }
+
+        function __createPool(address strategy) internal returns (uint256 _poolId) {
+            vm.prank(pool_admin());
+            _poolId = allo().createPoolWithCustomStrategy(
+                poolProfile_id(),
+                strategy,
+                __enocdeInitializeParams(),
+                address(superFakeDai),
+                0,
+                Metadata(1, "test"),
+                pool_managers()
+            );
+        }
+
+        function __register_recipient() internal returns (address recipientId) {
+            vm.expectEmit(true, true, true, false);
+            emit Registered(
+                profile1_anchor(), abi.encode(profile1_anchor(), recipient1(), Metadata(1, "test")), profile1_member1()
+            );
+
+            vm.prank(profile1_member1());
+            recipientId = allo().registerRecipient(poolId, abi.encode(profile1_anchor(), recipient1(), Metadata(1, "test")));
+        }
+
+        function __register_accept_recipient() internal returns (address recipientId) {
+            recipientId = __register_recipient();
+
+            address[] memory recipients = new address[](1);
+            recipients[0] = recipientId;
+
+            IStrategy.Status[] memory statuses = new IStrategy.Status[](1);
+            statuses[0] = IStrategy.Status.Accepted;
+
+            vm.prank(pool_manager1());
+            vm.expectEmit(true, true, true, false);
+            emit Reviewed(recipientId, IStrategy.Status.Accepted, pool_manager1());
+            _strategy.reviewRecipients(recipients, statuses);
+        }
+
+        function __register_accept_recipients() internal returns (address recipientId, address recipientId2) {
+            recipientId = __register_recipient();
+            vm.prank(profile2_member1());
+            recipientId2 =
+                allo().registerRecipient(poolId, abi.encode(profile2_anchor(), recipient2(), Metadata(1, "test")));
+
+            address[] memory recipients = new address[](2);
+            recipients[0] = recipientId;
+            recipients[1] = recipientId2;
+
+            IStrategy.Status[] memory statuses = new IStrategy.Status[](2);
+            statuses[0] = IStrategy.Status.Accepted;
+            statuses[1] = IStrategy.Status.Accepted;
+
+            vm.prank(pool_manager1());
+            vm.expectEmit(true, true, true, false);
+            emit Reviewed(recipientId, IStrategy.Status.Accepted, pool_manager1());
+            _strategy.reviewRecipients(recipients, statuses);
+            console.log("recipientId", recipientId);
+            console.log("recipientId2", recipientId2);
+
+            // check if the superApp has been created for the recipient by checking if it returns the host
+            address superApp = address(_strategy.getSuperApp(recipientId));
+            ISuperfluid hostFromApp = RecipientSuperApp(superApp).HOST();
+            assertEq(address(hostFromApp), superfluidHost);
+            assertEq(hostFromApp.isApp(ISuperApp(superApp)), true);
+            assertEq(RecipientSuperApp(superApp).recipient(), _strategy.getRecipient(recipientId).recipientAddress);
+            superApp = address(_strategy.getSuperApp(recipientId2));
+            hostFromApp = RecipientSuperApp(superApp).HOST();
+            assertEq(address(hostFromApp), superfluidHost);
+            assertEq(hostFromApp.isApp(ISuperApp(superApp)), true);
+            assertEq(RecipientSuperApp(superApp).recipient(), _strategy.getRecipient(recipientId2).recipientAddress);
+        }
+
+        function __register_reject_recipient() internal returns (address recipientId) {
+            recipientId = __register_recipient();
+
+            address[] memory recipients = new address[](1);
+            recipients[0] = recipientId;
+
+            IStrategy.Status[] memory statuses = new IStrategy.Status[](1);
+            statuses[0] = IStrategy.Status.Rejected;
+
+            vm.prank(pool_manager1());
+            vm.expectEmit(true, true, true, false);
+            emit Reviewed(recipientId, IStrategy.Status.Rejected, pool_manager1());
+            _strategy.reviewRecipients(recipients, statuses);
+        }
+    
+    /** end of helper function block **/
+
+    // FRAN's internal functions
+
+    function __setUpDonor(address _user) internal {
+        _passportDecoder.setScore(_user, 70);
+        vm.startPrank(superFakeDaiWhale);
+        superFakeDai.transfer(_user, 42 * 1e18);
+        vm.stopPrank();
+        vm.startPrank(_user);
+        superFakeDai.increaseFlowRateAllowanceWithPermissions(address(_strategy), 7, type(int96).max);
+        vm.stopPrank();
     }
 
-    function __register_accept_recipient() internal returns (address recipientId) {
-        recipientId = __register_recipient();
-
-        address[] memory recipients = new address[](1);
-        recipients[0] = recipientId;
-
-        IStrategy.Status[] memory statuses = new IStrategy.Status[](1);
-        statuses[0] = IStrategy.Status.Accepted;
+    function __setUpDistribution(int96 flowRate) internal returns (address recipient1, address recipient2){
+        (recipient1, recipient2) = __register_accept_recipients();
+        vm.warp(uint256(registrationEndTime) + 1);
 
         vm.prank(pool_manager1());
-        vm.expectEmit(true, true, true, false);
-        emit Reviewed(recipientId, IStrategy.Status.Accepted, pool_manager1());
-        _strategy.reviewRecipients(recipients, statuses);
+        allo().distribute(poolId, new address[](0), abi.encode(flowRate)); // second parameter is ignored
+
+        GeneralDistributionAgreementV1 gdaPool = GeneralDistributionAgreementV1(address(_strategy.gdaPool()));
+        int96 netFlowGDA = superFakeDai.getNetFlowRate(address(gdaPool));
+
+        assertEq(netFlowGDA, flowRate);
     }
 
-    function __register_accept_recipients() internal returns (address recipientId, address recipientId2) {
-        recipientId = __register_recipient();
-        vm.prank(profile2_member1());
-        recipientId2 =
-            allo().registerRecipient(poolId, abi.encode(profile2_anchor(), recipient2(), Metadata(1, "test")));
+    function __doAllocate(address sender, address recipientId, int96 flowRate) internal {
 
-        address[] memory recipients = new address[](2);
-        recipients[0] = recipientId;
-        recipients[1] = recipientId2;
+        int96 previousFlowRateToApp = superFakeDai.getFlowRate(sender, _strategy.superApps(recipientId));
+        int96 previousFlowRateToRecipient = superFakeDai.getFlowRate(_strategy.superApps(recipientId), recipientId);
 
-        IStrategy.Status[] memory statuses = new IStrategy.Status[](2);
-        statuses[0] = IStrategy.Status.Accepted;
-        statuses[1] = IStrategy.Status.Accepted;
+        vm.startPrank(sender);
+        allo().allocate(
+            poolId,
+            abi.encode(
+                recipientId,
+                flowRate
+            )
+        );
+        
+        vm.stopPrank();
+        // check that the outgoing flowrate from the superApp has increased
+        address superApp = address(_strategy.getSuperApp(recipientId));
+        address recipient = _strategy.getRecipient(recipientId).recipientAddress;
+        int96 newFlowRateToRecipient = superFakeDai.getFlowRate(superApp, recipient);
+        assertEq(newFlowRateToRecipient, previousFlowRateToRecipient + flowRate);
 
-        vm.prank(pool_manager1());
-        vm.expectEmit(true, true, true, false);
-        emit Reviewed(recipientId, IStrategy.Status.Accepted, pool_manager1());
-        _strategy.reviewRecipients(recipients, statuses);
+        // todo: some sort of check on the units as well
     }
 
-    function __register_reject_recipient() internal returns (address recipientId) {
-        recipientId = __register_recipient();
+    function __isAppJailed(address superApp) internal view returns (bool) {
+        bool condition = ISuperfluid(superfluidHost).isAppJailed(ISuperApp(superApp));
+        if(condition){
+            console.log("TEST: APP IS FUCKING JAILED");
+        }
+        return condition;   
+    }
 
-        address[] memory recipients = new address[](1);
-        recipients[0] = recipientId;
+    function __streamToSuperAppOfRecipient(address sender, address recipientId, int96 flowRate) internal {
+        address superApp = address(_strategy.getSuperApp(recipientId));
+        address recipientAddress = _strategy.getRecipient(recipientId).recipientAddress;
+        console.log("superApp", superApp);
+        console.log("flowRate", uint256(uint96(flowRate)));
+        int96 previousFlowRateToApp = superFakeDai.getFlowRate(sender, superApp);
+        console.log("previousFlowRateToApp", uint256(uint96(previousFlowRateToApp)));
+        int96 previousFlowRateToRecipient = superFakeDai.getFlowRate(superApp, recipientAddress);
+        console.log("previousFlowRateToRecipient", uint256(uint96(previousFlowRateToRecipient)));
 
-        IStrategy.Status[] memory statuses = new IStrategy.Status[](1);
-        statuses[0] = IStrategy.Status.Rejected;
+        __isAppJailed(superApp);
+        vm.startPrank(sender);        
+        // checks the previous and new flowrates, and accordingly uses superFakeDai.createFlow or superFakeDai.updateFlow or superFakeDai.deleteFlow to stream to the superApp
+        if(previousFlowRateToApp == 0) {
+            console.log("in the create block");
+            superFakeDai.createFlow(superApp, flowRate);
+        } else if (previousFlowRateToApp != 0 && flowRate == 0) {
+            console.log("in the delete block");
+            superFakeDai.deleteFlow(sender, superApp);
+        } else if (flowRate > 0){
+            superFakeDai.updateFlow(superApp, flowRate);
+        }
+        
+        vm.stopPrank();
+        // check that the outgoing flowrate from the superApp has increased
+        int96 newFlowRateToApp = superFakeDai.getFlowRate(sender, superApp);
+        console.log("newFlowRateToApp", uint256(uint96(newFlowRateToApp)));
 
-        vm.prank(pool_manager1());
-        vm.expectEmit(true, true, true, false);
-        emit Reviewed(recipientId, IStrategy.Status.Rejected, pool_manager1());
-        _strategy.reviewRecipients(recipients, statuses);
+        int96 newFlowRateToRecipient = superFakeDai.getFlowRate(superApp, recipientAddress);
+        console.log("newFlowRateToRecipient", uint256(uint96(newFlowRateToRecipient)));
+        int96 newNetFlowRate = superFakeDai.getCFANetFlowRate(superApp);
+        console.log("newNetFlowRate:");
+        console.logInt(newNetFlowRate);
+        assertEq(newNetFlowRate, 0);
+
+        assertEq(__isAppJailed(superApp), false);
     }
 }

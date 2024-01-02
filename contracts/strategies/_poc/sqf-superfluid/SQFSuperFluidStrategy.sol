@@ -5,7 +5,9 @@ pragma solidity 0.8.19;
 import {ReentrancyGuard} from "openzeppelin-contracts/contracts/security/ReentrancyGuard.sol";
 import {
     ISuperToken,
-    ISuperfluidPool
+    ISuperfluidPool,
+    ISuperfluid,
+    ISuperApp
 } from
     "../../../../lib/superfluid-protocol-monorepo/packages/ethereum-contracts/contracts/interfaces/superfluid/ISuperfluid.sol";
 import {PoolConfig} from
@@ -22,6 +24,7 @@ import {BaseStrategy} from "../../BaseStrategy.sol";
 // Internal Libraries
 import {Metadata} from "../../../core/libraries/Metadata.sol";
 import {RecipientSuperApp} from "./RecipientSuperApp.sol";
+import {console} from "hardhat/console.sol";
 
 contract SQFSuperFluidStrategy is BaseStrategy, ReentrancyGuard {
     using SuperTokenV1Library for ISuperToken;
@@ -430,7 +433,9 @@ contract SQFSuperFluidStrategy is BaseStrategy, ReentrancyGuard {
             Status recipientStatus = _recipientStatuses[i];
             address recipientId = _recipientIds[i];
             Recipient storage recipient = recipients[recipientId];
-
+            console.log("SUPERAPP: recipientId", recipientId);
+            console.log("SUPERAPP: recipient.recipientAddress", recipient.recipientAddress);
+            
             // only pending applications can be updated
             // and the new status can only be Accepted or Rejected
             if (
@@ -516,11 +521,17 @@ contract SQFSuperFluidStrategy is BaseStrategy, ReentrancyGuard {
     /// @param _newFlowRate The new flow rate
     function adjustWeightings(uint256 _previousFlowrate, uint256 _newFlowRate) external {
         address recipientId = superApps[msg.sender];
+        
+        if(ISuperfluid(superfluidHost).isAppJailed(ISuperApp(msg.sender))) {
+            console.log("STRATEGY: #LN522 APP JAILED!!!");
+        }
 
-        if (recipientId == address(0)) revert UNAUTHORIZED();
+        console.log("STRATEGY: recipientId: ", recipientId);
+        // todo: check if this revert is totally necessary.
+        if (recipientId == address(0)) return; //revert UNAUTHORIZED();
 
         uint256 recipientTotalUnits = totalUnitsByRecipient[recipientId] * 1000;
-
+        console.log("STRATEGY: recipientTotalUnits before: ", recipientTotalUnits);
         if (_previousFlowrate == 0) {
             // created a new flow
             recipientTotalUnits = (recipientTotalUnits.sqrt() + _newFlowRate.sqrt()) ** 2;
@@ -533,15 +544,22 @@ contract SQFSuperFluidStrategy is BaseStrategy, ReentrancyGuard {
         }
 
         recipientTotalUnits /= 1000;
+        console.log("STRATEGY: recipientTotalUnits after: ", recipientTotalUnits);
 
+        //todo: not sure why this is being done here
         Recipient storage recipient = recipients[recipientId];
 
         _updateMemberUnits(recipientId, recipient.recipientAddress, uint128(recipientTotalUnits));
 
-        totalUnitsByRecipient[recipientId] = recipientTotalUnits;
-
+        // fix: this is done twice, once in the above function and once here
+        // totalUnitsByRecipient[recipientId] = recipientTotalUnits;
+        
+        if(ISuperfluid(superfluidHost).isAppJailed(ISuperApp(msg.sender))) {
+            console.log("STRATEGY: #LN556 APP JAILED!!!");
+        }
         // todo: do we still need the currentFlowRate?
         uint256 currentFlowRate = recipientFlowRate[recipientId];
+        // todo: I think this isn't necessary, as the flowrate can always be queried
         recipientFlowRate[recipientId] = currentFlowRate + _newFlowRate - _previousFlowrate;
 
         emit TotalUnitsUpdated(recipientId, recipientTotalUnits);
