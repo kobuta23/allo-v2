@@ -151,6 +151,10 @@ contract SQFSuperFluidStrategy is BaseStrategy, ReentrancyGuard {
     /// @dev superApp => recipientId
     mapping(address => address) public superApps;
 
+    /// @notice stores the units for each recipient
+    /// @dev recipientId => allocator => units
+    mapping(address => mapping(address => uint256)) public recipientAllocatorUnits;
+
     /// @notice stores the total units for each recipient
     /// @dev recipientId => units
     mapping(address => uint256) public totalUnitsByRecipient;
@@ -513,31 +517,42 @@ contract SQFSuperFluidStrategy is BaseStrategy, ReentrancyGuard {
     /// @notice Adjust the weightings of the recipients
     /// @dev This can only be called by the super app callback onFlowUpdated
     /// @param _previousFlowrate The previous flow rate
-    /// @param _newFlowRate The new flow rate
-    function adjustWeightings(uint256 _previousFlowrate, uint256 _newFlowRate) external {
+    /// @param _newFlowRate The new flow rate    
+    /// @param _allocator The allocator address
+    function adjustWeightings(uint256 _previousFlowrate, uint256 _newFlowRate, address _allocator) external {
         address recipientId = superApps[msg.sender];
 
         if (recipientId == address(0)) revert UNAUTHORIZED();
+
+        uint256 unitsAfterAllocation;
+        uint256 unitsBeforeAllocation = recipientAllocatorUnits[recipientId][_allocator];
 
         uint256 recipientTotalUnits = totalUnitsByRecipient[recipientId] * 1000;
 
         if (_previousFlowrate == 0) {
             // created a new flow
+            unitsAfterAllocation = _newFlowRate;
             recipientTotalUnits = (recipientTotalUnits.sqrt() + _newFlowRate.sqrt()) ** 2;
         } else if (_newFlowRate == 0) {
             // canceled a flow
+            unitsAfterAllocation = 0;
             recipientTotalUnits = (recipientTotalUnits.sqrt() - _previousFlowrate.sqrt()) ** 2;
         } else {
             // updated a flow
+            unitsAfterAllocation = (unitsBeforeAllocation.sqrt() + _newFlowRate.sqrt() - _previousFlowrate.sqrt()) ** 2;
             recipientTotalUnits = (recipientTotalUnits.sqrt() + _newFlowRate.sqrt() - _previousFlowrate.sqrt()) ** 2;
         }
 
-        recipientTotalUnits /= 1000;
+        Recipient storage recipient = recipients[recipientId];
+
+        uint256 recipientTotalUnits = totalUnitsByRecipient[recipientId];
+        recipientTotalUnits += unitsAfterAllocation - unitsBeforeAllocation;
 
         Recipient storage recipient = recipients[recipientId];
 
         _updateMemberUnits(recipientId, recipient.recipientAddress, uint128(recipientTotalUnits));
 
+        recipientAllocatorUnits[recipientId][_allocator] = unitsAfterAllocation;
         totalUnitsByRecipient[recipientId] = recipientTotalUnits;
 
         // todo: do we still need the currentFlowRate?
